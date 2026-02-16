@@ -53,7 +53,7 @@ def prompt_retry(message: str) -> None:
     input("Press Enter to retry...")
 
 
-def apply_location_filter(page, location: str) -> None:
+def apply_location_filter(page, location: str) -> bool:
     selectors = [
         "input[aria-label='City, state, or zip code']",
         "input[aria-label='Location']",
@@ -107,102 +107,414 @@ def apply_location_filter(page, location: str) -> None:
             match = suggestions.filter(has_text=re.compile(re.escape(candidate), re.I))
             if match.count() > 0 and match.first.is_visible():
                 match.first.click()
-                return
+                return True
 
         # As a last resort, click the first suggestion
         if suggestions.first.is_visible():
             suggestions.first.click()
-            return
+            return True
 
     input_box.press("Enter")
+    return True
 
 
-def apply_date_posted_filter(page, label: str) -> None:
-    page.get_by_role("button", name=re.compile("Date posted", re.I)).click()
-    # try radio buttons first
-    option = page.get_by_role("radio", name=re.compile(label, re.I))
+def apply_date_posted_filter(page, label: str, use_all_filters: bool) -> bool:
+    # Prefer All filters panel when enabled
+    if use_all_filters:
+        print("date_posted: using All filters panel")
+        panel = open_filters_panel(page)
+        if not panel:
+            raise RuntimeError("Filters panel not found")
+
+        value_map = {
+            "past 24 hours": "r86400",
+            "past week": "r604800",
+            "past month": "r2592000",
+            "any time": "",
+        }
+        label_key = label.strip().lower()
+        value = value_map.get(label_key)
+
+        date_section = panel.locator("fieldset").filter(
+            has_text=re.compile("Date posted|Time posted", re.I)
+        )
+        if date_section.count() > 0:
+            date_section.first.scroll_into_view_if_needed()
+
+        # Prefer clicking the label inside the Date posted section
+        label_loc = None
+        if date_section.count() > 0:
+            label_loc = date_section.locator("label").filter(
+                has_text=re.compile(label, re.I)
+            )
+        if label_loc is None or label_loc.count() == 0:
+            label_loc = panel.locator("label").filter(has_text=re.compile(label, re.I))
+
+        if label_loc.count() > 0:
+            label_loc.first.click()
+        else:
+            option = None
+            if value is not None:
+                scope = date_section if date_section.count() > 0 else panel
+                option = scope.locator(
+                    f"input[name='date-posted-filter-value'][value='{value}']"
+                )
+                if value == "":
+                    option = scope.locator(
+                        "input[name='date-posted-filter-value'][id='timePostedRange-']"
+                    )
+
+            if not option or option.count() == 0:
+                option = panel.get_by_label(re.compile(label, re.I))
+
+            if option.count() == 0:
+                raise RuntimeError("Date posted option not found in filters panel")
+
+            try:
+                option.first.check(force=True)
+            except Exception:
+                option.first.click(force=True)
+
+        return True
+
+    # Top bar path
+    container = page.locator(
+        "div.search-reusables__filter-trigger-and-dropdown[data-basic-filter-parameter-name='timePostedRange']"
+    )
+    btn = None
+    if container.count() > 0:
+        btn = container.locator(
+            "button#searchFilter_timePostedRange, button[aria-label*='Date posted filter' i]"
+        )
+        if btn.count() > 0:
+            btn = btn.first
+
+    if not btn:
+        btn = find_date_posted_button(page)
+
+    if not btn:
+        print("date_posted: pill not found")
+        raise RuntimeError("Top-bar Date posted not found")
+
+    print("date_posted: pill found")
+    btn.click()
+    time.sleep(0.3)
+
+    dropdown = page.locator(
+        "div[role='listbox'], ul[role='listbox'], div[role='menu'], ul[role='menu']"
+    )
+    option = dropdown.get_by_role("menuitemradio", name=re.compile(label, re.I))
+    if option.count() == 0:
+        option = page.get_by_role("radio", name=re.compile(label, re.I))
     if option.count() == 0:
         option = page.get_by_label(re.compile(label, re.I))
-    option.first.click()
-    # apply
-    apply_btn = page.get_by_role("button", name=re.compile("Show results|Apply", re.I))
-    if apply_btn.count() > 0:
-        apply_btn.first.click()
 
-
-def apply_easy_apply_filter(page) -> None:
-    # Try direct filter button
-    try:
-        btn = page.get_by_role("button", name=re.compile("^Easy Apply$", re.I))
-        if btn.count() > 0:
-            pressed = btn.first.get_attribute("aria-pressed")
-            if pressed != "true":
-                btn.first.click()
-                time.sleep(0.3)
-            return
-    except Exception:
-        pass
-
-    # Try within All filters
-    page.get_by_role("button", name=re.compile("All filters", re.I)).click()
-    checkbox = page.get_by_role("checkbox", name=re.compile("Easy Apply", re.I))
-    if checkbox.count() == 0:
-        checkbox = page.locator("label:has-text('Easy Apply') input[type='checkbox']")
-    if checkbox.count() > 0:
-        checkbox.first.check()
-    page.get_by_role("button", name=re.compile("Show results|Apply", re.I)).first.click()
-
-
-def clear_distance_filter(page) -> None:
-    # Prefer the top-level Distance filter if present
-    opened = False
-    try:
-        btn = page.get_by_role("button", name=re.compile("^Distance$", re.I))
-        if btn.count() > 0:
-            btn.first.click()
-            opened = True
-    except Exception:
-        pass
-
-    if not opened:
-        try:
-            page.get_by_role("button", name=re.compile("All filters", re.I)).click()
-            opened = True
-        except Exception:
-            return
-
-    option = page.get_by_role("radio", name=re.compile("Any distance|Any", re.I))
     if option.count() == 0:
-        option = page.get_by_label(re.compile("Any distance|Any", re.I))
+        raise RuntimeError("Date posted option not found in top bar")
+
+    try:
+        option.first.check(force=True)
+    except Exception:
+        option.first.click(force=True)
+    return True
+
+
+def apply_easy_apply_filter(page, use_all_filters: bool) -> bool:
+    # Try direct filter button (top bar) first
+    btn = find_top_filter_button(page, re.compile("Easy Apply", re.I))
+    if btn:
+        pressed = btn.get_attribute("aria-pressed")
+        if pressed != "true":
+            btn.click()
+            time.sleep(0.3)
+        return True
+
+    if not use_all_filters:
+        raise RuntimeError("Top-bar Easy Apply not found")
+
+    panel = open_filters_panel(page)
+    if not panel:
+        raise RuntimeError("Filters panel not found")
+    ensure_filter_section(panel, re.compile("Easy Apply|Kolay", re.I))
+    checkbox = panel.get_by_role("checkbox", name=re.compile("Easy Apply|Kolay", re.I))
+    if checkbox.count() == 0:
+        checkbox = panel.locator("label:has-text('Easy Apply') input[type='checkbox']")
+    if checkbox.count() == 0:
+        checkbox = panel.locator("label:has-text('Kolay') input[type='checkbox']")
+    if checkbox.count() == 0:
+        # fallback: click the label/container that includes the text
+        label = panel.locator("label, li, div").filter(
+            has_text=re.compile("Easy Apply|Kolay", re.I)
+        )
+        if label.count() > 0:
+            label.first.scroll_into_view_if_needed()
+            label.first.click()
+        else:
+            raise RuntimeError("Easy Apply checkbox not found in filters panel")
+    else:
+        checkbox.first.scroll_into_view_if_needed()
+        checkbox.first.check(force=True)
+    panel.get_by_role("button", name=re.compile("Show results|Apply", re.I)).first.click()
+    return True
+
+
+def clear_distance_filter(page, use_all_filters: bool) -> bool:
+    # Prefer the top-level Distance filter if present
+    btn = find_top_filter_button(page, re.compile("^Distance$", re.I))
+    if btn:
+        btn.click()
+        option = page.get_by_role("radio", name=re.compile("Any distance|Any", re.I))
+        if option.count() == 0:
+            option = page.get_by_label(re.compile("Any distance|Any", re.I))
+        if option.count() > 0:
+            try:
+                option.first.check(force=True)
+            except Exception:
+                option.first.click(force=True)
+        return True
+
+    if not use_all_filters:
+        return True
+
+    panel = open_filters_panel(page)
+    if not panel:
+        raise RuntimeError("Filters panel not found")
+
+    fieldset = ensure_filter_section(panel, re.compile("Distance", re.I))
+    option = None
+    if fieldset.count() > 0:
+        option = fieldset.get_by_role("radio", name=re.compile("Any distance|Any", re.I))
+        if option.count() == 0:
+            option = fieldset.get_by_label(re.compile("Any distance|Any", re.I))
+
+    if not option or option.count() == 0:
+        option = panel.get_by_role("radio", name=re.compile("Any distance|Any", re.I))
+        if option.count() == 0:
+            option = panel.get_by_label(re.compile("Any distance|Any", re.I))
+
     if option.count() > 0:
-        option.first.click()
-        apply_btn = page.get_by_role("button", name=re.compile("Show results|Apply", re.I))
+        option.first.scroll_into_view_if_needed()
+        try:
+            option.first.check(force=True)
+        except Exception:
+            option.first.click(force=True)
+        apply_btn = panel.get_by_role("button", name=re.compile("Show results|Apply", re.I))
         if apply_btn.count() > 0:
             apply_btn.first.click()
+        return True
+    return False
+
+
+def open_filters_panel(page):
+    candidates = [
+        page.get_by_role("button", name=re.compile("^All filters$", re.I)),
+        page.get_by_role("button", name=re.compile("^Filters$", re.I)),
+        page.get_by_role("button", name=re.compile("All filters", re.I)),
+        page.locator("button[aria-label*='All filters' i]"),
+        page.locator("button[aria-label*='Filters' i]"),
+        page.locator("button[data-control-name='all_filters']"),
+    ]
+    clicked = False
+    for loc in candidates:
+        try:
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.click()
+                clicked = True
+                break
+        except Exception:
+            continue
+
+    if not clicked:
+        return None
+
+    time.sleep(0.5)
+    panel = page.locator("div[role='dialog']").filter(
+        has=page.get_by_role("button", name=re.compile("Show results|Apply", re.I))
+    )
+    if panel.count() > 0:
+        return panel.first
+
+    panel = page.locator("section[aria-label*='Filters' i], aside[aria-label*='Filters' i]")
+    if panel.count() > 0 and panel.first.is_visible():
+        return panel.first
+
+    return None
+
+
+def ensure_filter_section(panel, name_regex):
+    headers = panel.locator("button, summary").filter(has_text=name_regex)
+    if headers.count() > 0:
+        header = headers.first
+        try:
+            expanded = header.get_attribute("aria-expanded")
+            if expanded == "false":
+                header.click()
+        except Exception:
+            try:
+                header.click()
+            except Exception:
+                pass
+
+    fieldset = panel.locator("fieldset").filter(has_text=name_regex)
+    if fieldset.count() > 0:
+        fieldset.first.scroll_into_view_if_needed()
+    return fieldset
+
+
+def find_top_filter_button(page, name_regex):
+    containers = [
+        page.locator("ul.search-reusables__filter-list"),
+        page.locator("ul.search-reusables__filters-list"),
+        page.locator("div.search-reusables__filters-bar"),
+        page.locator("div.jobs-search-filters__filter-list"),
+        page.locator("div.jobs-search-filters__filters"),
+        page.locator("div.jobs-search-filters__filters-bar"),
+        page.locator("div.jobs-search-filters"),
+        page.locator("section.jobs-search-filters"),
+    ]
+    for container in containers:
+        if container.count() > 0:
+            btn = container.get_by_role("button", name=name_regex)
+            if btn.count() > 0 and btn.first.is_visible():
+                return btn.first
+            btn = container.locator("button, span, div").filter(has_text=name_regex)
+            if btn.count() > 0 and btn.first.is_visible():
+                candidate = btn.first
+                try:
+                    if candidate.get_attribute("role") != "button":
+                        ancestor = candidate.locator("xpath=ancestor::button[1]")
+                        if ancestor.count() > 0:
+                            return ancestor.first
+                        ancestor = candidate.locator("xpath=ancestor::*[@role='button'][1]")
+                        if ancestor.count() > 0:
+                            return ancestor.first
+                except Exception:
+                    pass
+                return candidate
+            text_match = container.get_by_text(name_regex)
+            if text_match.count() > 0 and text_match.first.is_visible():
+                candidate = text_match.first
+                try:
+                    ancestor = candidate.locator("xpath=ancestor-or-self::button[1]")
+                    if ancestor.count() > 0 and ancestor.first.is_visible():
+                        return ancestor.first
+                    ancestor = candidate.locator("xpath=ancestor-or-self::*[@role='button'][1]")
+                    if ancestor.count() > 0 and ancestor.first.is_visible():
+                        return ancestor.first
+                except Exception:
+                    pass
+                return candidate
+
+    btn = page.get_by_role("button", name=name_regex)
+    if btn.count() > 0 and btn.first.is_visible():
+        return btn.first
+    btn = page.locator("button[aria-label]").filter(has_text=name_regex)
+    if btn.count() > 0 and btn.first.is_visible():
+        return btn.first
+    btn = page.locator("button").filter(has_text=name_regex)
+    if btn.count() > 0 and btn.first.is_visible():
+        return btn.first
+    return None
+
+
+def find_filters_bar_container(page):
+    containers = [
+        page.locator("ul.search-reusables__filter-list"),
+        page.locator("ul.search-reusables__filters-list"),
+        page.locator("div.search-reusables__filters-bar"),
+        page.locator("div.jobs-search-filters__filter-list"),
+        page.locator("div.jobs-search-filters__filters"),
+        page.locator("div.jobs-search-filters__filters-bar"),
+        page.locator("div.jobs-search-filters"),
+        page.locator("section.jobs-search-filters"),
+    ]
+    for container in containers:
+        if container.count() == 0:
+            continue
+        # Prefer containers that include a known filter like "All filters" or "Easy Apply"
+        if (
+            container.get_by_role("button", name=re.compile("All filters|Easy Apply", re.I)).count()
+            > 0
+            or container.locator("button").filter(
+                has_text=re.compile("All filters|Easy Apply", re.I)
+            ).count()
+            > 0
+        ):
+            return container
+    return None
+
+
+def find_date_posted_button(page):
+    name_regex = re.compile("Date posted|Time posted", re.I)
+    container = find_filters_bar_container(page)
+    if container:
+        btn = container.get_by_role("button", name=name_regex)
+        if btn.count() > 0 and btn.first.is_visible():
+            return btn.first
+        btn = container.locator("[role='button']").filter(has_text=name_regex)
+        if btn.count() > 0 and btn.first.is_visible():
+            return btn.first
+        btn = container.locator("button").filter(has_text=name_regex)
+        if btn.count() > 0 and btn.first.is_visible():
+            return btn.first
+        btn = container.locator("span, div").filter(has_text=name_regex)
+        if btn.count() > 0 and btn.first.is_visible():
+            candidate = btn.first
+            try:
+                ancestor = candidate.locator("xpath=ancestor-or-self::button[1]")
+                if ancestor.count() > 0 and ancestor.first.is_visible():
+                    return ancestor.first
+                ancestor = candidate.locator("xpath=ancestor-or-self::*[@role='button'][1]")
+                if ancestor.count() > 0 and ancestor.first.is_visible():
+                    return ancestor.first
+            except Exception:
+                pass
+            return candidate
+
+    # Fallback: visible button with label
+    btn = page.get_by_role("button", name=name_regex)
+    if btn.count() > 0 and btn.first.is_visible():
+        return btn.first
+    btn = page.locator("[role='button']").filter(has_text=name_regex)
+    if btn.count() > 0 and btn.first.is_visible():
+        return btn.first
+    return None
 
 
 def apply_filters(page, filters: dict) -> None:
     failures = []
+    use_all_filters = filters.get("use_all_filters", True)
+    wait_after_each = filters.get("wait_after_each_seconds", 0)
+    wait_after_location = filters.get("wait_after_location_seconds", wait_after_each)
     if filters.get("location"):
         try:
-            apply_location_filter(page, filters["location"])
+            ok = apply_location_filter(page, filters["location"])
+            print(f"location: {'applied' if ok else 'not applied'}")
+            wait_for_results_refresh(page, wait_after_location)
         except Exception as e:
+            print(f"location: failed ({e})")
             failures.append(f"location ({e})")
     # Clear distance when not explicitly set
     if "distance" in filters and not filters.get("distance"):
         try:
-            clear_distance_filter(page)
+            clear_distance_filter(page, use_all_filters)
         except Exception as e:
             failures.append(f"distance ({e})")
     if filters.get("time_posted"):
         try:
-            apply_date_posted_filter(page, filters["time_posted"])
+            ok = apply_date_posted_filter(page, filters["time_posted"], use_all_filters)
+            print(f"time_posted: {'applied' if ok else 'not applied'}")
+            wait_for_results_refresh(page, wait_after_each)
         except Exception as e:
+            print(f"time_posted: failed ({e})")
             failures.append(f"time_posted ({e})")
     if filters.get("easy_apply"):
         try:
-            apply_easy_apply_filter(page)
+            ok = apply_easy_apply_filter(page, use_all_filters)
+            print(f"easy_apply: {'applied' if ok else 'not applied'}")
+            wait_for_results_refresh(page, wait_after_each)
         except Exception as e:
+            print(f"easy_apply: failed ({e})")
             failures.append(f"easy_apply ({e})")
 
     if failures:
@@ -211,6 +523,36 @@ def apply_filters(page, filters: dict) -> None:
             print(f"- {item}")
         print("Please set these filters manually in the browser.")
         input("Press Enter to continue...")
+
+
+def wait_for_results_refresh(page, min_wait_seconds: float) -> None:
+    if min_wait_seconds:
+        time.sleep(min_wait_seconds)
+
+    list_locator = page.locator("ul.jobs-search-results__list li")
+    before = None
+    try:
+        if list_locator.count() > 0:
+            before = list_locator.nth(0).text_content()
+    except Exception:
+        before = None
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+
+    if before:
+        end_time = time.time() + 5
+        while time.time() < end_time:
+            try:
+                if list_locator.count() > 0:
+                    after = list_locator.nth(0).text_content()
+                    if after and after != before:
+                        break
+            except Exception:
+                pass
+            time.sleep(0.3)
 
 
 def extract_job_id(card):
