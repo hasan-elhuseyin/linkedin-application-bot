@@ -755,6 +755,147 @@ def auto_fill_defaults_in_modal(modal, defaults: dict) -> None:
                 if fill_input(inp.first):
                     print(f"salary: filled via label '{text}'")
 
+
+def ensure_follow_company_unchecked(modal) -> None:
+    # Direct selector from observed DOM
+    cb = modal.locator("#follow-company-checkbox")
+    if cb.count() == 0:
+        cb = modal.page.locator("#follow-company-checkbox")
+    if cb.count() > 0:
+        try:
+            state = cb.first.evaluate(
+                "el => ({checked: el.checked, attr: el.getAttribute('checked')})"
+            )
+        except Exception:
+            state = {"checked": None, "attr": None}
+        if state.get("checked") is True:
+            try:
+                result = cb.first.evaluate(
+                    "el => { el.checked = false; "
+                    "el.dispatchEvent(new Event('input', {bubbles:true})); "
+                    "el.dispatchEvent(new Event('change', {bubbles:true})); "
+                    "return el.checked; }"
+                )
+                print(f"follow_company: set checked false -> {result}")
+            except Exception:
+                pass
+        # If still checked, click label to toggle
+        try:
+            if cb.first.is_checked():
+                lbl = modal.locator("label[for='follow-company-checkbox']")
+                if lbl.count() == 0:
+                    lbl = modal.page.locator("label[for='follow-company-checkbox']")
+                if lbl.count() > 0:
+                    lbl.first.click(force=True)
+                    time.sleep(0.1)
+            if cb.first.is_checked():
+                # Last resort: click the input directly
+                cb.first.click(force=True)
+                time.sleep(0.1)
+        except Exception:
+            pass
+        try:
+            final_checked = cb.first.is_checked()
+        except Exception:
+            final_checked = None
+        print(f"follow_company: final checked={final_checked}")
+        if final_checked is False:
+            return
+
+    keywords = [
+        "follow",
+        "company",
+        "employer",
+        "follow the company",
+        "follow company",
+        "stay up to date",
+        "işvereni takip",
+        "şirketi takip",
+        "sirketi takip",
+        "takip et",
+    ]
+    kw_re = re.compile("|".join(re.escape(k) for k in keywords), re.I)
+
+    # Prefer role-based checkbox (often used in LinkedIn modals)
+    role_cb = modal.get_by_role("checkbox", name=re.compile("follow", re.I))
+    if role_cb.count() > 0:
+        cb = role_cb.first
+        try:
+            aria_checked = cb.get_attribute("aria-checked")
+        except Exception:
+            aria_checked = None
+        try:
+            checked = cb.is_checked()
+        except Exception:
+            checked = None
+        if aria_checked == "true" or checked is True:
+            cb.click(force=True)
+            print("follow_company: unchecked via role=checkbox")
+            return
+
+    # Explicit input checkbox with aria-label
+    checkboxes = modal.locator("input[type='checkbox']")
+    for i in range(checkboxes.count()):
+        cb = checkboxes.nth(i)
+        try:
+            aria = cb.get_attribute("aria-label") or ""
+        except Exception:
+            aria = ""
+        if aria and kw_re.search(aria):
+            try:
+                checked = cb.is_checked()
+            except Exception:
+                checked = None
+            if checked is True:
+                cb.uncheck(force=True)
+                print("follow_company: unchecked via aria-label")
+            return
+
+    # Look for labels containing keywords
+    labels = modal.locator("label")
+    for i in range(labels.count()):
+        lbl = labels.nth(i)
+        try:
+            text = (lbl.text_content() or "").strip()
+        except Exception:
+            text = ""
+        if not text or not kw_re.search(text):
+            continue
+        # Try direct for= link
+        target_id = lbl.get_attribute("for")
+        if target_id:
+            cb = modal.locator(f"#{target_id}")
+            if cb.count() > 0:
+                try:
+                    checked = cb.first.is_checked()
+                except Exception:
+                    checked = None
+                if checked is True:
+                    cb.first.uncheck(force=True)
+                    print("follow_company: unchecked via label for=")
+                return
+        # Fallback: nested checkbox or role checkbox
+        cb = lbl.locator("input[type='checkbox']")
+        if cb.count() > 0:
+            try:
+                checked = cb.first.is_checked()
+            except Exception:
+                checked = None
+            if checked is True:
+                lbl.click(force=True)
+                print("follow_company: unchecked via nested checkbox")
+            return
+        role_cb = lbl.get_by_role("checkbox")
+        if role_cb.count() > 0:
+            try:
+                aria_checked = role_cb.first.get_attribute("aria-checked")
+            except Exception:
+                aria_checked = None
+            if aria_checked == "true":
+                role_cb.first.click(force=True)
+                print("follow_company: unchecked via label role=checkbox")
+            return
+
 def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
     # Modal should already be open
     pause_on_unfilled = behavior.get("pause_on_unfilled", True)
@@ -769,6 +910,11 @@ def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
 
         try:
             auto_fill_defaults_in_modal(modal, defaults)
+        except Exception:
+            pass
+
+        try:
+            ensure_follow_company_unchecked(modal)
         except Exception:
             pass
 
