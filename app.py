@@ -526,6 +526,41 @@ def apply_filters(page, filters: dict) -> None:
         input("Press Enter to continue...")
 
 
+def get_job_cards(page):
+    selectors = [
+        "ul.jobs-search-results__list li",
+        "div.jobs-search-results-list ul li",
+        "div.jobs-search-results-list__content ul li",
+        "ul.scaffold-layout__list-container li",
+        "div.scaffold-layout__list-detail-inner ul li",
+        "li[data-occludable-job-id]",
+        "li[data-job-id]",
+        "div.job-card-container",
+        "div[data-occludable-job-id]",
+        "div[data-job-id]",
+    ]
+    for sel in selectors:
+        loc = page.locator(sel)
+        if loc.count() > 0:
+            return loc
+    return page.locator("ul.jobs-search-results__list li")  # default empty locator
+
+
+def get_results_container(page):
+    selectors = [
+        "div.jobs-search-results-list",
+        "div.jobs-search-results-list__content",
+        "ul.jobs-search-results__list",
+        "div.scaffold-layout__list-detail",
+        "div.scaffold-layout__list-detail-inner",
+    ]
+    for sel in selectors:
+        loc = page.locator(sel)
+        if loc.count() > 0 and loc.first.is_visible():
+            return loc.first
+    return None
+
+
 def wait_for_results_refresh(page, min_wait_seconds: float) -> None:
     if min_wait_seconds:
         time.sleep(min_wait_seconds)
@@ -605,7 +640,35 @@ def get_job_company(page):
 
 
 def easy_apply_button(page):
-    btn = page.locator("button:has-text('Easy Apply')")
+    label_re = re.compile("Easy Apply|Kolay", re.I)
+    containers = [
+        "div.jobs-details__main-content",
+        "div.jobs-details__container",
+        "div.jobs-search__job-details",
+        "div.jobs-search__job-details--wrapper",
+        "section.jobs-details-top-card",
+        "div.jobs-unified-top-card",
+        "main#main",
+    ]
+    for sel in containers:
+        container = page.locator(sel)
+        if container.count() == 0:
+            continue
+        btn = container.locator("button").filter(has_text=label_re)
+        if btn.count() > 0:
+            primary = btn.filter(has=page.locator(".artdeco-button--primary"))
+            if primary.count() > 0:
+                return primary.first
+            # prefer buttons that look like apply action
+            apply_btn = btn.filter(has=page.locator("span")).filter(
+                has_text=label_re
+            )
+            if apply_btn.count() > 0:
+                return apply_btn.first
+            return btn.first
+
+    # Fallback: specific class used for apply buttons
+    btn = page.locator("button.jobs-apply-button").filter(has_text=label_re)
     if btn.count() > 0:
         return btn.first
     return None
@@ -707,7 +770,7 @@ def main():
 
         while True:
             try:
-                list_locator = page.locator("ul.jobs-search-results__list li")
+                list_locator = get_job_cards(page)
                 if list_locator.count() == 0:
                     print("No job cards found. Make sure the Jobs search results list is visible.")
                     time.sleep(3)
@@ -764,9 +827,9 @@ def main():
 
                 # Scroll to load more results
                 try:
-                    results_container = page.locator("div.jobs-search-results-list")
-                    if results_container.count() > 0:
-                        results_container.first.evaluate("(el) => el.scrollBy(0, 1200)")
+                    results_container = get_results_container(page)
+                    if results_container:
+                        results_container.evaluate("(el) => el.scrollBy(0, 1200)")
                     else:
                         page.mouse.wheel(0, 1200)
                 except Exception:
