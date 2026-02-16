@@ -1,0 +1,11 @@
+filters:
+  location: "Türkiye"
+  distance: null
+  time_posted: "Past 24 hours"
+  easy_apply: true
+behavior:
+  pause_on_unfilled: true
+  wait_for_submit: true
+  max_idle_seconds: 900
+state:
+  file: "state/applied.json"
