@@ -687,6 +687,18 @@ def wait_for_modal_close(page, max_wait_seconds=None):
     return True
 
 
+def click_done_if_present(page, timeout_ms=8000) -> bool:
+    done_btn = page.locator("button:has-text('Done')")
+    try:
+        if done_btn.count() == 0:
+            done_btn = page.get_by_role("button", name=re.compile("Done|Bitti|Tamam", re.I))
+        done_btn.first.wait_for(state="visible", timeout=timeout_ms)
+        done_btn.first.click()
+        return True
+    except Exception:
+        return False
+
+
 def auto_fill_defaults_in_modal(modal, defaults: dict) -> None:
     salary = defaults.get("salary")
     if not salary:
@@ -900,6 +912,7 @@ def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
     # Modal should already be open
     pause_on_unfilled = behavior.get("pause_on_unfilled", True)
     max_idle = behavior.get("max_idle_seconds", 900)
+    auto_submit = behavior.get("auto_submit", False)
 
     last_action = time.time()
 
@@ -920,15 +933,38 @@ def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
 
         submit_btn = modal.locator("button:has-text('Submit')")
         if submit_btn.count() > 0 and submit_btn.first.is_visible():
-            print("Ready to submit. Please review and click Submit in the modal.")
-            if not wait_for_modal_close(page, max_idle):
-                print("Timed out waiting for submit. Leaving modal open.")
-                return "timeout"
-            # Sometimes a Done button appears after submit
-            done_btn = page.locator("button:has-text('Done')")
-            if done_btn.count() > 0 and done_btn.first.is_visible():
-                done_btn.first.click()
-            return "submitted"
+            if auto_submit:
+                print("Auto-submitting application...")
+                submit_btn.first.click()
+                time.sleep(0.5)
+                # Check for validation errors after submit
+                error = modal.locator(".artdeco-inline-feedback__message")
+                if error.count() > 0 and error.first.is_visible():
+                    if pause_on_unfilled:
+                        print("Validation error after submit. Fill required fields in the modal.")
+                        input("Press Enter to continue...")
+                    continue
+                # Click Done if the post-submit screen appears
+                click_done_if_present(page)
+                if not wait_for_modal_close(page, max_idle):
+                    print("Timed out waiting after submit. Leaving modal open.")
+                    return "timeout"
+                done_btn = page.locator("button:has-text('Done')")
+                if done_btn.count() > 0 and done_btn.first.is_visible():
+                    done_btn.first.click()
+                return "submitted"
+            else:
+                print("Ready to submit. Please review and click Submit in the modal.")
+                # After user submits, click Done if it appears
+                click_done_if_present(page)
+                if not wait_for_modal_close(page, max_idle):
+                    print("Timed out waiting for submit. Leaving modal open.")
+                    return "timeout"
+                # Sometimes a Done button appears after submit
+                done_btn = page.locator("button:has-text('Done')")
+                if done_btn.count() > 0 and done_btn.first.is_visible():
+                    done_btn.first.click()
+                return "submitted"
 
         review_btn = modal.locator("button:has-text('Review')")
         if review_btn.count() > 0 and review_btn.first.is_visible():

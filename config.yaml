@@ -8,6 +8,7 @@ filters:
 behavior:
   pause_on_unfilled: true
   wait_for_submit: true
+  auto_submit: true
   max_idle_seconds: 900
 defaults:
   salary: 90000
