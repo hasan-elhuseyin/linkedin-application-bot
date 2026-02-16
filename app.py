@@ -561,6 +561,21 @@ def get_results_container(page):
     return None
 
 
+def is_recently_applied_card(card) -> bool:
+    try:
+        text = card.text_content() or ""
+    except Exception:
+        return False
+    t = " ".join(text.split()).lower()
+    # Match: "Applied 5 minutes ago", "Applied 2 hours ago", "Applied a few minutes ago"
+    if re.search(r"\bapplied\b.*\bago\b", t):
+        if re.search(r"\b(\d+|a|an|few)\b.*\b(minute|minutes|hour|hours)\b", t):
+            return True
+        if re.search(r"\b\d+\s*(m|h)\b", t):
+            return True
+    return False
+
+
 def wait_for_results_refresh(page, min_wait_seconds: float) -> None:
     if min_wait_seconds:
         time.sleep(min_wait_seconds)
@@ -935,6 +950,7 @@ def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
         if submit_btn.count() > 0 and submit_btn.first.is_visible():
             if auto_submit:
                 print("Auto-submitting application...")
+                time.sleep(2)
                 submit_btn.first.click()
                 time.sleep(0.5)
                 # Check for validation errors after submit
@@ -1000,7 +1016,6 @@ def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
 
 def main():
     config = load_config(CONFIG_PATH)
-    filters = config.get("filters", {})
     behavior = config.get("behavior", {})
     defaults = config.get("defaults", {})
     state_path = config.get("state", {}).get("file", "state/applied.json")
@@ -1018,9 +1033,6 @@ def main():
         page.bring_to_front()
         page.set_default_timeout(5000)
 
-        print("Applying filters...")
-        apply_filters(page, filters)
-
         print("Starting job loop. Press Ctrl+C in the terminal to stop.")
         seen = set(state.get("jobs", {}).keys())
 
@@ -1037,6 +1049,17 @@ def main():
                     card = list_locator.nth(i)
                     job_id = extract_job_id(card) or f"idx-{i}-{int(time.time())}"
                     if job_id in seen:
+                        continue
+                    if is_recently_applied_card(card):
+                        state["jobs"][job_id] = {
+                            "status": "skipped_recently_applied",
+                            "title": None,
+                            "company": None,
+                            "url": page.url,
+                            "updated_at": now_iso(),
+                        }
+                        save_state(state_path, state)
+                        seen.add(job_id)
                         continue
 
                     try:

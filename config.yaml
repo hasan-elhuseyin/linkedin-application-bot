@@ -1,10 +1,3 @@
-filters:
-  location: "Türkiye"
-  time_posted: "Past 24 hours"
-  easy_apply: true
-  use_all_filters: true
-  wait_after_location_seconds: 1
-  wait_after_each_seconds: 1
 behavior:
   pause_on_unfilled: true
   wait_for_submit: true
