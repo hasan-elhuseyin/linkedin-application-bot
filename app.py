@@ -511,6 +511,7 @@ def apply_filters(page, filters: dict) -> None:
     if filters.get("easy_apply"):
         try:
             ok = apply_easy_apply_filter(page, use_all_filters)
+            ok = apply_easy_apply_filter(page, use_all_filters)
             print(f"easy_apply: {'applied' if ok else 'not applied'}")
             wait_for_results_refresh(page, wait_after_each)
         except Exception as e:
