@@ -687,7 +687,75 @@ def wait_for_modal_close(page, max_wait_seconds=None):
     return True
 
 
-def complete_easy_apply(page, behavior: dict) -> str:
+def auto_fill_defaults_in_modal(modal, defaults: dict) -> None:
+    salary = defaults.get("salary")
+    if not salary:
+        return
+
+    keywords = [
+        "salary",
+        "compensation",
+        "pay",
+        "expected salary",
+        "desired salary",
+        "salary expectation",
+        "annual",
+        "monthly",
+        "hourly",
+        "rate",
+        "wage",
+        "maaş",
+        "maas",
+        "ücret",
+        "ucret",
+        "maaş beklentisi",
+        "ucret beklentisi",
+    ]
+    kw_re = re.compile("|".join(re.escape(k) for k in keywords), re.I)
+
+    def fill_input(input_locator):
+        try:
+            current = input_locator.input_value()
+        except Exception:
+            current = ""
+        if current and str(current).strip():
+            return False
+        input_locator.fill(str(salary))
+        return True
+
+    # 1) Inputs with aria-label
+    inputs = modal.locator("input[type='text'], input[type='number'], textarea")
+    for i in range(inputs.count()):
+        inp = inputs.nth(i)
+        try:
+            aria = inp.get_attribute("aria-label") or ""
+        except Exception:
+            aria = ""
+        if aria and kw_re.search(aria):
+            if fill_input(inp):
+                print(f"salary: filled via aria-label '{aria}'")
+
+    # 2) Label -> input via for=
+    labels = modal.locator("label")
+    for i in range(labels.count()):
+        lbl = labels.nth(i)
+        try:
+            text = (lbl.text_content() or "").strip()
+        except Exception:
+            text = ""
+        if not text or not kw_re.search(text):
+            continue
+        try:
+            target_id = lbl.get_attribute("for")
+        except Exception:
+            target_id = None
+        if target_id:
+            inp = modal.locator(f"#{target_id}")
+            if inp.count() > 0:
+                if fill_input(inp.first):
+                    print(f"salary: filled via label '{text}'")
+
+def complete_easy_apply(page, behavior: dict, defaults: dict) -> str:
     # Modal should already be open
     pause_on_unfilled = behavior.get("pause_on_unfilled", True)
     max_idle = behavior.get("max_idle_seconds", 900)
@@ -698,6 +766,11 @@ def complete_easy_apply(page, behavior: dict) -> str:
         modal = page.locator("div[role='dialog']")
         if not modal.is_visible():
             return "closed"
+
+        try:
+            auto_fill_defaults_in_modal(modal, defaults)
+        except Exception:
+            pass
 
         submit_btn = modal.locator("button:has-text('Submit')")
         if submit_btn.count() > 0 and submit_btn.first.is_visible():
@@ -747,6 +820,7 @@ def main():
     config = load_config(CONFIG_PATH)
     filters = config.get("filters", {})
     behavior = config.get("behavior", {})
+    defaults = config.get("defaults", {})
     state_path = config.get("state", {}).get("file", "state/applied.json")
     state = load_state(state_path)
 
@@ -813,7 +887,7 @@ def main():
                         continue
 
                     time.sleep(1)
-                    result = complete_easy_apply(page, behavior)
+                    result = complete_easy_apply(page, behavior, defaults)
 
                     state["jobs"][job_id] = {
                         "status": result,
