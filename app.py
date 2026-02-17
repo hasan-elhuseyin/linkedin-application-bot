@@ -1020,6 +1020,8 @@ def main():
     defaults = config.get("defaults", {})
     state_path = config.get("state", {}).get("file", "state/applied.json")
     state = load_state(state_path)
+    refresh_after_submitted = behavior.get("refresh_after_submitted", None)
+    submitted_since_refresh = 0
 
     with sync_playwright() as p:
         print("Connecting to Chrome on http://localhost:9222 ...")
@@ -1103,6 +1105,16 @@ def main():
                     }
                     save_state(state_path, state)
                     seen.add(job_id)
+                    if result == "submitted" and refresh_after_submitted:
+                        submitted_since_refresh += 1
+                        if submitted_since_refresh >= int(refresh_after_submitted):
+                            print(f"Refreshing page after {submitted_since_refresh} submissions...")
+                            try:
+                                page.reload(wait_until="domcontentloaded")
+                                time.sleep(2)
+                            except Exception:
+                                pass
+                            submitted_since_refresh = 0
 
                 # Scroll to load more results
                 try:

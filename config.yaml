@@ -3,6 +3,7 @@ behavior:
   wait_for_submit: true
   auto_submit: true
   max_idle_seconds: 900
+  refresh_after_submitted: 5
 defaults:
   salary: 90000
 state:
